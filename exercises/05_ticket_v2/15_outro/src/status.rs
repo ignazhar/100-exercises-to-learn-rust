@@ -8,7 +8,8 @@ pub enum Status {
     Done,
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("`{invalid_status}` is not a valid status. Use one of: ToDo, InProgress, Done")]
 pub struct StatusParseError {
     invalid_status: String,
 }
