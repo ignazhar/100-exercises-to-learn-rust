@@ -10,31 +10,40 @@ pub mod store;
 #[derive(Clone)]
 pub struct TicketStoreClient {
     sender: SyncSender<Command>,
-    channel_capacity: usize,
 }
 
 impl TicketStoreClient {
-    pub fn insert(&self, draft: TicketDraft) -> Result<TicketId, TrySendError<TicketDraft>> {
-        let (insert_sender, insert_receiver) = sync_channel(self.channel_capacity);
-        match self.sender.send(Command::Insert { draft: draft.clone(), response_channel: insert_sender }) {
-            Ok(()) => Ok(insert_receiver.recv().unwrap()),
-            Err(_) => Err(TrySendError::Full(draft))
-        }
+    pub fn insert(&self, draft: TicketDraft) -> Result<TicketId, OverloadedError> {
+        let (insert_sender, insert_receiver) = sync_channel(1);
+        self.sender
+            .try_send(Command::Insert {
+                draft: draft.clone(),
+                response_channel: insert_sender,
+            })
+            .map_err(|_| OverloadedError)?;
+        Ok(insert_receiver.recv().unwrap())
     }
 
-    pub fn get(&self, id: TicketId) -> Result<Option<Ticket>, TrySendError<TicketId>> {
-        let (get_sender, get_receiver) = sync_channel(self.channel_capacity);
-        match self.sender.send(Command::Get { id: id, response_channel: get_sender }) {
-            Ok(()) => Ok(get_receiver.recv().unwrap()),
-            Err(_) => Err(TrySendError::Full(id))
-        }
+    pub fn get(&self, id: TicketId) -> Result<Option<Ticket>, OverloadedError> {
+        let (get_sender, get_receiver) = sync_channel(1);
+        self.sender
+            .try_send(Command::Get {
+                id: id,
+                response_channel: get_sender,
+            })
+            .map_err(|_| OverloadedError)?;
+        Ok(get_receiver.recv().unwrap())
     }
 }
+
+#[derive(Debug, thiserror::Error)]
+#[error("The store is overloaded")]
+pub struct OverloadedError;
 
 pub fn launch(capacity: usize) -> TicketStoreClient {
     let (sender, receiver) = sync_channel(capacity);
     std::thread::spawn(move || server(receiver));
-    TicketStoreClient { sender: sender, channel_capacity: capacity }
+    TicketStoreClient { sender }
 }
 
 enum Command {
@@ -48,7 +57,7 @@ enum Command {
     },
 }
 
-pub fn server(receiver: Receiver<Command>) {
+fn server(receiver: Receiver<Command>) {
     let mut store = TicketStore::new();
     loop {
         match receiver.recv() {
