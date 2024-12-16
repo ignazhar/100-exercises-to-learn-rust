@@ -11,8 +11,11 @@ pub async fn echo(listener: TcpListener) -> Result<(), anyhow::Error> {
         let mut socket = socket.into_std()?;
         socket.set_nonblocking(false)?;
         let mut buffer = Vec::new();
-        socket.read_to_end(&mut buffer)?;
-        socket.write_all(&buffer)?;
+        let _handle = tokio::task::spawn_blocking(move || -> Result<(), anyhow::Error> {
+            socket.read_to_end(&mut buffer)?;
+            socket.write_all(&buffer)?;
+            Ok(())
+        });
     }
 }
 
